@@ -1,5 +1,8 @@
 # Nonequilibrium quantum states emerging from flippable spins in random networks
 
+[![arXiv](https://img.shields.io/badge/arXiv-2505.11466-b31b1b.svg)](https://arxiv.org/abs/2505.11466)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23414366.svg)](https://doi.org/10.5281/zenodo.23414366)
+
 Code and data for
 
 > Yoshiaki Horiike and Yuki Kawaguchi,

@@ -1,10 +1,11 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite the associated paper and, if convenient, this repository via its Zenodo DOI."
-title: "Code for: Nonequilibrium quantum states emerging from flippable spins in random networks"
+title: "Code and data for: Nonequilibrium quantum states emerging from flippable spins in random networks"
 authors:
   - family-names: "Horiike"
     given-names: "Yoshiaki"
     orcid: "https://orcid.org/0009-0000-2010-2598"
+doi: "10.5281/zenodo.23414366"
 date-released: "2026-10-16"
 repository-code: "https://github.com/yoshiysoh/code-quantum-ising-networks"
 license: BSD-3-Clause
