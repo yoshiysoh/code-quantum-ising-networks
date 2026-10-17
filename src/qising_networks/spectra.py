@@ -1,4 +1,5 @@
-"""Eigenstate and level statistics of sector Hamiltonians (Figs. 2, S5-S8).
+"""Eigenstate and level statistics of sector Hamiltonians (Fig. 2 and
+Extended Data Figs. 5-8).
 
 Also holds the two per-network workers behind the Fig. 2 data
 (scripts/generate_spectral_data.py): level-spacing ratios of the largest
@@ -11,16 +12,15 @@ from __future__ import annotations
 from itertools import combinations
 
 import numpy as np
-from scipy import special
 
 from . import model
 from . import scar_metrics as sm
 
 GAMMA = 0.1
-MIN_BLOCK = 20     # below this, <r> over a block is meaningless
-MIN_LEVELS = 10    # levels needed for a <r> value
+MIN_BLOCK = 20  # below this, <r> over a block is meaningless
+MIN_LEVELS = 10  # levels needed for a <r> value
 MIN_EIG_SECTOR = 3  # smallest sector whose eigenstates are recorded
-NUM_STD = 3.0      # atypical: S2 this many std below the largest subspace's
+NUM_STD = 3.0  # atypical: S2 this many std below the largest subspace's
 POISSON, GOE = 0.386, 0.531  # <r> of uncorrelated and of GOE levels
 # A phi level enters the largest-subspace <r> only if at least this
 # fraction of its networks has a largest subspace of >= MIN_BLOCK states.
@@ -32,8 +32,13 @@ PHI_CHAOTIC_EPS = 0.1
 def level_spacing_ratios(evals):
     """min(s_n, s_{n+1}) / max(s_n, s_{n+1}) for sorted levels evals."""
     energy_diff = np.diff(evals) + 1e-8
-    return np.min((np.divide(energy_diff[:-1], energy_diff[1:]),
-                   np.divide(energy_diff[1:], energy_diff[:-1])), axis=0)
+    return np.min(
+        (
+            np.divide(energy_diff[:-1], energy_diff[1:]),
+            np.divide(energy_diff[1:], energy_diff[:-1]),
+        ),
+        axis=0,
+    )
 
 
 def mean_level_ratio(levels: np.ndarray) -> float:
@@ -53,14 +58,9 @@ def participation_entropy(evecs: np.ndarray, order: float = 2) -> np.ndarray:
     )
 
 
-def goe_participation_entropy(dim, order=2):
-    """Participation entropy of a GOE eigenvector of dimension dim."""
-    c = np.log(special.factorial2(2 * order - 1)) / (order - 1)
-    return np.log(dim) - c - order * (order - 1) / (2 * dim)
-
-
-def global_entanglement(evecs: np.ndarray, sector_state_indices: np.ndarray,
-                        num_spins: int) -> np.ndarray:
+def global_entanglement(
+    evecs: np.ndarray, sector_state_indices: np.ndarray, num_spins: int
+) -> np.ndarray:
     """Meyer-Wallach global entanglement Q of every column of evecs, whose
     rows are the Fock states sector_state_indices (sorted ascending)."""
     n_eig = evecs.shape[1]
@@ -99,7 +99,7 @@ def _network_sector(num_spins, model_name, k, seed):
 def level_statistics_worker(args):
     """(phi, <r> of the sector, <r> of its largest subspace, sector dim,
     largest-subspace dim, number of subspaces, largest-subspace fraction)."""
-    net_idx, num_spins, model_name, k, seed = args
+    _net_idx, num_spins, model_name, k, seed = args
     rng, sec_idx, H = _network_sector(num_spins, model_name, k, seed)
     dim = len(sec_idx)
     if dim < MIN_BLOCK:
@@ -113,15 +113,24 @@ def level_statistics_worker(args):
     member = np.flatnonzero(split.labels == int(np.argmax(sizes)))
 
     # A small random diagonal field lifts trivial degeneracies.
-    H = H + np.diag(model.sector_diagonal_noise(sec_idx, num_spins, GAMMA,
-                                                rng))
+    H = H + np.diag(
+        model.sector_diagonal_noise(sec_idx, num_spins, GAMMA, rng)
+    )
     r_whole = mean_level_ratio(np.linalg.eigvalsh(H))
     r_giant = np.nan
     if len(member) >= MIN_BLOCK:
         r_giant = mean_level_ratio(
-            np.linalg.eigvalsh(H[np.ix_(member, member)]))
-    return (k / num_spins, float(r_whole), float(r_giant), float(dim),
-            float(len(member)), float(len(sizes)), len(member) / dim)
+            np.linalg.eigvalsh(H[np.ix_(member, member)])
+        )
+    return (
+        k / num_spins,
+        float(r_whole),
+        float(r_giant),
+        float(dim),
+        float(len(member)),
+        float(len(sizes)),
+        len(member) / dim,
+    )
 
 
 def eigenstate_worker(args):
@@ -139,8 +148,9 @@ def eigenstate_worker(args):
         A = sm.adjacency_from_H(H, GAMMA)
     except RuntimeError:
         return None
-    H = H + np.diag(model.sector_diagonal_noise(sec_idx, num_spins, GAMMA,
-                                                rng))
+    H = H + np.diag(
+        model.sector_diagonal_noise(sec_idx, num_spins, GAMMA, rng)
+    )
     labels = sm.split_components(A, ss).labels
     n_comp = labels.max() + 1
     sizes = np.bincount(labels, minlength=n_comp)
@@ -161,16 +171,20 @@ def eigenstate_worker(args):
         z = (s2 - s2[ref].mean()) / s2[ref].std()
         atyp = ref & (z < -NUM_STD)
 
-    return dict(s2=s2, atyp=atyp, giant_wt=(host == giant).astype(float),
-                host_size=sizes[host].astype(float),
-                sector_dim=np.full(len(s2), float(dim)),
-                giant_frac=np.full(len(s2), sizes[giant] / dim),
-                n_comp=np.full(len(s2), float(n_comp)),
-                phi=np.full(len(s2), k / num_spins),
-                net=np.full(len(s2), float(net_idx)))
+    return {
+        "s2": s2,
+        "atyp": atyp,
+        "giant_wt": (host == giant).astype(float),
+        "host_size": sizes[host].astype(float),
+        "sector_dim": np.full(len(s2), float(dim)),
+        "giant_frac": np.full(len(s2), sizes[giant] / dim),
+        "n_comp": np.full(len(s2), float(n_comp)),
+        "phi": np.full(len(s2), k / num_spins),
+        "net": np.full(len(s2), float(net_idx)),
+    }
 
 
-# ── Eigenstates of one example sector (Figs. S5-S7) ───────────────────────
+# ── Eigenstates of one example sector (Extended Data Figs. 5-7) ──────────
 Z_WINDOW = 0.5  # energy window, in units of Gamma, for local_z outliers
 
 
@@ -181,10 +195,12 @@ def half_entropy(V, sec_idx, N, A):
     B = [i for i in range(N) if i not in A]
     full = np.zeros((2**N, n), dtype=V.dtype)
     full[sec_idx] = V
-    psi = (full.T.reshape((n,) + (2,) * N)
-           .transpose([0] + [1 + i for i in A] + [1 + i for i in B])
-           .reshape(n, 2**len(A), -1))
-    p = np.linalg.svd(psi, compute_uv=False)**2
+    psi = (
+        full.T.reshape((n,) + (2,) * N)
+        .transpose([0] + [1 + i for i in A] + [1 + i for i in B])
+        .reshape(n, 2 ** len(A), -1)
+    )
+    p = np.linalg.svd(psi, compute_uv=False) ** 2
     return -(p * np.log(np.where(p > 0, p, 1))).sum(1)
 
 
@@ -194,7 +210,11 @@ def half_cut_entropy(V, sec_idx, N, ring):
     sector-averaged entropy is the median over all C(N, N/2)/2 cuts."""
     if ring:
         cuts = [[(j + i) % N for i in range(N // 2)] for j in range(N // 2)]
-        return np.mean([half_entropy(V, sec_idx, N, A) for A in cuts], 0), None, None
+        return (
+            np.mean([half_entropy(V, sec_idx, N, A) for A in cuts], 0),
+            None,
+            None,
+        )
     cuts = [[0, *c] for c in combinations(range(1, N), N // 2 - 1)]
     S = np.array([half_entropy(V, sec_idx, N, A) for A in cuts])
     k = np.argsort(S.mean(1))[len(cuts) // 2]
@@ -222,15 +242,17 @@ def eigensystem(im, h, sec_idx, ring=False):
     accidental duplicates) are dropped, since their S2 is basis-dependent.
     Ring: translation T and reflection R are resolved first -- tiny
     symmetry-breaking terms make eigh return simultaneous eigenstates of
-    H, T and R (as in Fig. S6's scar tower) -- and only states still
-    degenerate within the same (momentum, parity) labels are dropped.
+    H, T and R (as in Extended Data Fig. 6's scar tower) -- and only states
+    still degenerate within the same (momentum, parity) labels are
+    dropped.
     Returns (E, V, Fock indices of the subspace, E0).
     """
     N = len(h)
     H = model.sector_hamiltonian(im, h, sec_idx, GAMMA)
     E0 = float(np.diag(H).mean())  # classical energy of the equienergy sector
-    labels = sm.split_components(sm.adjacency_from_H(H, GAMMA),
-                                 sm.states_from_indices(sec_idx, N)).labels
+    labels = sm.split_components(
+        sm.adjacency_from_H(H, GAMMA), sm.states_from_indices(sec_idx, N)
+    ).labels
     member = np.flatnonzero(labels == np.argmax(np.bincount(labels)))
     H, sub = H[np.ix_(member, member)], sec_idx[member]
     if not ring:
@@ -241,7 +263,7 @@ def eigensystem(im, h, sec_idx, ring=False):
     pos = {s: i for i, s in enumerate(sub)}
 
     def to_idx(b):
-        return pos[int(''.join(map(str, b)), 2)]
+        return pos[int("".join(map(str, b)), 2)]
 
     T = np.zeros_like(H)
     T[[to_idx(np.roll(b, 1)) for b in bits], np.arange(len(sub))] = 1
@@ -249,10 +271,15 @@ def eigensystem(im, h, sec_idx, ring=False):
     R[[to_idx(b[::-1]) for b in bits], np.arange(len(sub))] = 1
     assert np.abs(H @ T - T @ H).max() < 1e-12
     _, V = np.linalg.eigh(H + 1e-6 * (T + T.T) + 3e-7j * (T - T.T) + 2e-8 * R)
-    E = np.einsum('ia,ij,ja->a', V.conj(), H, V).real
-    m = np.rint(np.angle(np.einsum('ia,ij,ja->a', V.conj(), T, V))
-                / (2 * np.pi / N)).astype(int) % N
-    p = np.sign(np.einsum('ia,ij,ja->a', V.conj(), R, V).real)
+    E = np.einsum("ia,ij,ja->a", V.conj(), H, V).real
+    m = (
+        np.rint(
+            np.angle(np.einsum("ia,ij,ja->a", V.conj(), T, V))
+            / (2 * np.pi / N)
+        ).astype(int)
+        % N
+    )
+    p = np.sign(np.einsum("ia,ij,ja->a", V.conj(), R, V).real)
     p = np.where((m == 0) | (m == N // 2), p, 0)
     key = np.c_[m, p]
     keep = np.ones(len(E), dtype=bool)
@@ -263,8 +290,9 @@ def eigensystem(im, h, sec_idx, ring=False):
     return E[keep][order], V[:, keep][:, order], sub, E0
 
 
-def analyse_eigenstates(im, h, sec_idx, ring=False, num_std=NUM_STD,
-                        z_window=Z_WINDOW):
+def analyse_eigenstates(
+    im, h, sec_idx, ring=False, num_std=NUM_STD, z_window=Z_WINDOW
+):
     """S2, Q and S_half of the nondegenerate eigenstates of the largest
     subspace (see eigensystem); atypical = S2 more than num_std standard
     deviations below their mean; S_half outliers by local_z within
@@ -287,11 +315,24 @@ def analyse_eigenstates(im, h, sec_idx, ring=False, num_std=NUM_STD,
     S_half, half_cut, all_cuts = half_cut_entropy(V, sub, N, ring)
     zS = local_z(E, S_half, z_window * GAMMA)
     zQ = local_z(E, Q, z_window * GAMMA)
-    return dict(N=N, E=E, E0=E0, s2=s2, Q=Q, atyp=atyp, cut=cut,
-                r=r, r_partial=r_partial, dim=len(sub),
-                n_eig=len(E),
-                S_half=S_half, half_cut=half_cut, all_cuts=all_cuts,
-                zS=zS, zQ=zQ,
-                ent_outlier=zS < -num_std,
-                r_h=float(np.corrcoef(S_half, Q)[0, 1]),
-                r_h_partial=float(np.corrcoef(resid(S_half), resid(Q))[0, 1]))
+    return {
+        "N": N,
+        "E": E,
+        "E0": E0,
+        "s2": s2,
+        "Q": Q,
+        "atyp": atyp,
+        "cut": cut,
+        "r": r,
+        "r_partial": r_partial,
+        "dim": len(sub),
+        "n_eig": len(E),
+        "S_half": S_half,
+        "half_cut": half_cut,
+        "all_cuts": all_cuts,
+        "zS": zS,
+        "zQ": zQ,
+        "ent_outlier": zS < -num_std,
+        "r_h": float(np.corrcoef(S_half, Q)[0, 1]),
+        "r_h_partial": float(np.corrcoef(resid(S_half), resid(Q))[0, 1]),
+    }

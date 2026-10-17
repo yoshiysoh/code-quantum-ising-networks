@@ -16,18 +16,20 @@ import pytest
 LIBRARY_MODULES = [
     "qising_networks.class_fractions",
     "qising_networks.examples",
-    "qising_networks.fig_maker",
-    "qising_networks.fig_maker_helper",
+    "qising_networks.h5io",
     "qising_networks.model",
     "qising_networks.plots.common",
     "qising_networks.plots.dynamics",
+    "qising_networks.plots.figure",
     "qising_networks.plots.fractions",
+    "qising_networks.plots.landscape",
     "qising_networks.plots.spectral",
     "qising_networks.scar_metrics",
     "qising_networks.spectra",
 ]
-SCRIPTS = sorted((Path(__file__).resolve().parent.parent / "scripts")
-                 .glob("*.py"))
+SCRIPTS = sorted(
+    (Path(__file__).resolve().parent.parent / "scripts").glob("*.py")
+)
 
 
 @pytest.mark.parametrize("module_name", LIBRARY_MODULES)

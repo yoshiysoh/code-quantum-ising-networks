@@ -1,28 +1,12 @@
-"""Project-specific figure-making helpers for code008 (quantum Ising
-network scar dataset). Imports fig_maker; never the reverse."""
+"""Two-dimensional projection of the Fock-space hypercube (Fig. 1f)."""
 
+from __future__ import annotations
 
-import matplotlib as mpl
 import numpy as np
 
-from . import model
+from .. import model
 
 
-COLOR_FERRO = "black"
-COLOR_PMJ = "gray"
-
-# Classes in scar_metrics order (the label integer is the index).
-CLASS_NAMES = (
-    "Localized",
-    "Recurrence",
-    "Scar",
-    "Plateau scar",
-    "Thermalized",
-)
-CLASS_COLORS = tuple(mpl.colormaps["tab10"].colors[:5])
-
-
-# ── Hilbert-space projection (Fig. 1 f) ───────────────────────────────────
 class WPCA:
     """Weighted principal components of the 2**N spin configurations."""
 
@@ -53,8 +37,9 @@ def hilbert_space_projection(interaction_matrix, external_field_h, seed=42):
     """
     rng = np.random.default_rng(seed)
     num_spins = len(interaction_matrix)
-    energies = np.vstack(model.classical_energies(interaction_matrix,
-                                                  external_field_h))
+    energies = np.vstack(
+        model.classical_energies(interaction_matrix, external_field_h)
+    )
     dim = 2**num_spins
     idx = np.arange(dim)
     hyp = np.zeros((dim, dim))
@@ -62,7 +47,8 @@ def hilbert_space_projection(interaction_matrix, external_field_h, seed=42):
         hyp[idx, idx ^ (1 << (num_spins - 1 - i))] += 1.0
     hyp_same = hyp * (energies.T == energies).astype(int)
     weights = np.sum(hyp_same, axis=0)
-    weights = weights + np.abs(rng.normal(np.mean(weights), 1,
-                                          size=len(weights)))
+    weights = weights + np.abs(
+        rng.normal(np.mean(weights), 1, size=len(weights))
+    )
     wpca = WPCA().fit(model.generate_all_ising_states(num_spins), weights)
     return wpca, hyp, hyp_same, energies

@@ -1,13 +1,19 @@
-"""Size-matched null for the fidelity revival (Fig. S8).
+"""Size-matched null for the fidelity revival (Extended Data Fig. 8).
 
 For each subspace dimension D, F_rev of a random basis state under GOE
 matrices rescaled to the median spectral extent of real subspaces of that
 dimension. scar_metrics uses the table to judge a revival against what its
-subspace gives by chance.
+subspace gives by chance. With --rule early-dip the revival is the
+earlier rule that Extended Data Fig. 8 compares with: the maximum after the
+deepest dip in Jt <= scar_metrics.RELAX_TIME.
 
-Writes revival_null.npz to data/<date of the run>/ (or --out-dir).
+Writes revival_null.h5 (or revival_null_early_dip.h5) to
+data/<date of the run>/ (or --out-dir).
 
-Run: python3 -u build_revival_null.py --N 13 --model ferro --nets 12 --reps 200
+Run:
+    python3 -u build_revival_null.py --N 13 --model ferro --nets 12 --reps 200
+    python3 -u build_revival_null.py --N 13 --model ferro --nets 12 --reps 200 \
+        --rule early-dip
 """
 
 from __future__ import annotations
@@ -20,10 +26,16 @@ import numpy as np
 
 from qising_networks import run_dir
 from qising_networks import scar_metrics as sm
+from qising_networks.h5io import save_arrays
+from qising_networks.model import (
+    GAMMA,
+    build_network,
+    degree_to_h_on_off,
+    h_on_off_to_h,
+    largest_sector,
+)
 from qising_networks.scar_metrics import make_time_grid
-from qising_networks.model import build_network, degree_to_h_on_off, h_on_off_to_h
 
-from qising_networks.model import GAMMA, largest_sector
 TIME_MAX = sm.DEFAULT_TIME_MAX
 DIMS = np.unique(np.round(np.geomspace(2, 4096, 40)).astype(int))
 PERCENTILES = (50, 90, 99)
@@ -64,7 +76,7 @@ def extent_model(real):
     return dims[keep], med[keep]
 
 
-def null_at(dim, extent, n_rep, rng):
+def null_at(dim, extent, n_rep, rng, after_dip=False):
     """F_rev of a random basis state under a GOE of this dim and bandwidth."""
     vals = np.empty(n_rep)
     for i in range(n_rep):
@@ -79,7 +91,7 @@ def null_at(dim, extent, n_rep, rng):
         a = int(rng.integers(dim))
         amp = U @ (np.exp(-1j * np.outer(t, ev)) * U[a]).T
         F = np.abs(amp[a]) ** 2
-        vals[i] = sm.revival(F, t)
+        vals[i] = sm.revival(F, t, after_dip=after_dip)
     return vals
 
 
@@ -89,33 +101,75 @@ def main():
     ap.add_argument("--model", default="ferro")
     ap.add_argument("--nets", type=int, default=12)
     ap.add_argument("--reps", type=int, default=200)
-    ap.add_argument("--out-dir", type=Path, default=None,
-                    help="default: data/<today's date>/")
+    ap.add_argument(
+        "--rule",
+        choices=("relax", "early-dip"),
+        default="relax",
+        help="revival rule (see the module docstring)",
+    )
+    ap.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="default: data/<today's date>/",
+    )
     args = ap.parse_args()
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
 
-    log.info("measuring real subspace bandwidths (N=%d, %d networks)",
-             args.N, args.nets)
+    log.info(
+        "measuring real subspace bandwidths (N=%d, %d networks)",
+        args.N,
+        args.nets,
+    )
     real = measure_real_extents(args.N, args.model, args.nets)
     dims_r, ext_r = extent_model(real)
-    log.info("  %d subspaces, dimensions %d..%d", len(real),
-             int(real[:, 0].min()), int(real[:, 0].max()))
+    log.info(
+        "  %d subspaces, dimensions %d..%d",
+        len(real),
+        int(real[:, 0].min()),
+        int(real[:, 0].max()),
+    )
 
     rng = np.random.default_rng(0)
     rows = []
     for D in DIMS:
         extent = float(np.interp(np.log(D), np.log(dims_r), ext_r))
         reps = max(20, int(args.reps * min(1.0, 64 / D)))
-        v = null_at(int(D), extent, reps, rng)
+        v = null_at(
+            int(D), extent, reps, rng, after_dip=args.rule == "early-dip"
+        )
         rows.append([D, extent, reps, *np.percentile(v, PERCENTILES)])
-        log.info("  D=%5d extent=%.3f reps=%3d  p50=%.4f p90=%.4f p99=%.4f",
-                 D, extent, reps, *np.percentile(v, PERCENTILES))
+        log.info(
+            "  D=%5d extent=%.3f reps=%3d  p50=%.4f p90=%.4f p99=%.4f",
+            D,
+            extent,
+            reps,
+            *np.percentile(v, PERCENTILES),
+        )
 
-    out = (args.out_dir or run_dir()) / "revival_null.npz"
-    np.savez(out, table=np.array(rows), percentiles=np.array(PERCENTILES),
-             time_max=TIME_MAX, source_N=args.N, source_model=args.model,
-             real_dims=dims_r, real_extent=ext_r)
+    name = (
+        "revival_null.h5"
+        if args.rule == "relax"
+        else "revival_null_early_dip.h5"
+    )
+    out = (args.out_dir or run_dir()) / name
+    save_arrays(
+        out,
+        {
+            "table": np.array(rows),
+            "percentiles": np.array(PERCENTILES),
+            "real_dims": dims_r,
+            "real_extent": ext_r,
+        },
+        attrs={
+            "time_max": TIME_MAX,
+            "source_N": args.N,
+            "source_model": args.model,
+            "rule": args.rule,
+        },
+    )
     log.info("wrote %s", out)
 
 

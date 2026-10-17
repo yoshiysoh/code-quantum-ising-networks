@@ -2,8 +2,10 @@
 checkpoints) into the file the unsharded run would have written.
 
 Each realisation's seed is fixed by its position in the full job list, so
-copies from different runs agree to round-off; the first is kept. The
-output holds every (net, phi) realisation once, sorted by (phi, net).
+copies from different runs agree to round-off; the first is kept. With
+--replace, a later copy replaces an earlier one instead (to put
+regenerated realisations into a dataset). The output holds every
+(net, phi) realisation once, sorted by (phi, net).
 
 Run: python3 merge_class_shards.py --out OUT.h5 IN1.h5 IN2.h5 ...
 """
@@ -55,8 +57,9 @@ def close_row(a: dict, b: dict) -> float | None:
     return float(np.max(np.abs(sa - sb), initial=0.0))
 
 
-def merge(inputs: list[Path],
-          report_missing: bool = False) -> tuple[dict, list[dict]]:
+def merge(
+    inputs: list[Path], report_missing: bool = False, replace: bool = False
+) -> tuple[dict, list[dict]]:
     base: dict | None = None
     rows: dict[tuple[int, float], dict] = {}
     for path in inputs:
@@ -68,32 +71,46 @@ def merge(inputs: list[Path],
         n_dup, max_dev = 0, 0.0
         for r in new:
             key = (int(r["net_idx"]), float(r["phi_target"]))
-            if key in rows:
+            if key in rows and replace:
+                rows[key] = r
+                n_dup += 1
+            elif key in rows:
                 dev = close_row(r, rows[key])
                 if dev is None:
                     raise ValueError(f"{path}: realisation {key} differs")
                 n_dup, max_dev = n_dup + 1, max(max_dev, dev)
             else:
                 rows[key] = r
-        print(f"{path.name}: {len(new)} realisations ({n_dup} already seen, "
-              f"max deviation {max_dev:.1e})")
+        print(
+            f"{path.name}: {len(new)} realisations ({n_dup} already seen"
+            + (", replaced)" if replace else f", max deviation {max_dev:.1e})")
+        )
     if base is None:
         raise ValueError("no inputs")
 
-    expected = {(net, float(lvl)) for lvl in base["phi_levels"]
-                for net in range(int(base["n_nets"]))}
+    expected = {
+        (net, float(lvl))
+        for lvl in base["phi_levels"]
+        for net in range(int(base["n_nets"]))
+    }
     missing, extra = expected - rows.keys(), rows.keys() - expected
     if report_missing:
         levels = [float(v) for v in base["phi_levels"]]
-        idx = sorted(levels.index(phi) * int(base["n_nets"]) + net
-                     for net, phi in missing)
+        idx = sorted(
+            levels.index(phi) * int(base["n_nets"]) + net
+            for net, phi in missing
+        )
         print(":".join(map(str, idx)))
         return base, []
     if missing or extra:
-        raise ValueError(f"{len(missing)} realisations missing "
-                         f"(e.g. {sorted(missing)[:5]}), {len(extra)} extra")
-    merged = sorted(rows.values(),
-                    key=lambda r: (float(r["phi_target"]), int(r["net_idx"])))
+        raise ValueError(
+            f"{len(missing)} realisations missing "
+            f"(e.g. {sorted(missing)[:5]}), {len(extra)} extra"
+        )
+    merged = sorted(
+        rows.values(),
+        key=lambda r: (float(r["phi_target"]), int(r["net_idx"])),
+    )
     return base, merged
 
 
@@ -101,9 +118,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("inputs", type=Path, nargs="+")
     ap.add_argument("--out", type=Path)
-    ap.add_argument("--report-missing", action="store_true",
-                    help="print the missing job indices (colon-separated) "
-                         "instead of merging")
+    ap.add_argument(
+        "--replace",
+        action="store_true",
+        help="later inputs replace realisations of earlier ones",
+    )
+    ap.add_argument(
+        "--report-missing",
+        action="store_true",
+        help="print the missing job indices (colon-separated) "
+        "instead of merging",
+    )
     args = ap.parse_args()
     if args.report_missing:
         merge(args.inputs, report_missing=True)
@@ -113,7 +138,7 @@ def main():
     if args.out.exists():
         raise SystemExit(f"{args.out} exists; not overwriting")
     try:
-        params, rows = merge(args.inputs)
+        params, rows = merge(args.inputs, replace=args.replace)
     except ValueError as err:
         raise SystemExit(f"not merged: {err}") from err
     write_h5(args.out, rows, params)

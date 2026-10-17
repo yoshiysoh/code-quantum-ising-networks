@@ -19,8 +19,11 @@ MANIFEST = DATA_DIR / "SHA256SUMS"
 def manifest() -> list[tuple[str, str]]:
     if not MANIFEST.exists():
         return []
-    return [tuple(line.split()) for line in MANIFEST.read_text().splitlines()
-            if line.strip()]
+    return [
+        tuple(line.split())
+        for line in MANIFEST.read_text().splitlines()
+        if line.strip()
+    ]
 
 
 @pytest.mark.skipif(not MANIFEST.exists(), reason="data/ not downloaded")

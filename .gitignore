@@ -161,8 +161,12 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-.trunk/
 .DS_Store
 
 # Script runs write to data/<date>/; only the final files in data/ are published
 data/????-??-??/
+
+# Run outputs: dated run directories and wrapper logs
+data/20*/
+logs/
+.ruff_cache/

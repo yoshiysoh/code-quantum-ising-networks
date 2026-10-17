@@ -1,4 +1,5 @@
-"""Finite-size extrapolation data of Fig. 2 e-h (and S2).
+"""Finite-size extrapolation data of Figs. 2e-h and 4b (and Extended Data
+Figs. 2 and 4).
 
 Reduces the outputs of generate_spectral_data.py and
 generate_class_dataset.py, for N = 8-15, to the quantities plotted against
@@ -9,8 +10,8 @@ recurrence fraction falls to the thermalized one). Realisations are
 seeded independently per (network, phi), so the crossings are bootstrapped
 over networks.
 
-Reads data/spectral_data*.npz and data/classes_N*.h5; writes
-spectral_extrapolation.npz to data/<date of the run>/.
+Reads data/spectral_data*.h5 and data/classes_N*.h5; writes
+spectral_extrapolation.h5 to data/<date of the run>/.
 
 Run: python3 -u extrapolate_spectral_data.py
 """
@@ -23,10 +24,11 @@ from pathlib import Path
 import numpy as np
 
 from qising_networks import DATA_DIR as RESULTS
-from qising_networks import run_dir
 from qising_networks import class_fractions as acf
-from qising_networks import spectra
+from qising_networks import run_dir, spectra
 from qising_networks import scar_metrics as sm
+from qising_networks.h5io import load_arrays, save_arrays
+
 N_VALUES = list(range(8, 16))
 MODELS = ("ferro", "pmJ")
 MIN_BLOCK = spectra.MIN_BLOCK
@@ -35,19 +37,20 @@ POISSON, GOE = spectra.POISSON, spectra.GOE
 R_MID = (POISSON + GOE) / 2
 PHI_CHAOTIC_EPS = spectra.PHI_CHAOTIC_EPS
 N_BOOT = 2000
-RNG_SEED = 20260903
+RNG_SEED = 42
 
 
 def load_spectral_data(results: Path = RESULTS) -> dict[str, np.ndarray]:
     """generate_spectral_data.py's output, sweep and --extra merged."""
     merged: dict[str, np.ndarray] = {}
-    for name in ("spectral_data.npz", "spectral_data_extra.npz"):
-        merged.update(dict(np.load(results / name).items()))
+    for name in ("spectral_data.h5", "spectral_data_extra.h5"):
+        merged.update(load_arrays(results / name))
     return merged
 
 
-def phi1_giant_frac(a: np.ndarray,
-                     extra: np.ndarray | None = None) -> tuple[float, float]:
+def phi1_giant_frac(
+    a: np.ndarray, extra: np.ndarray | None = None
+) -> tuple[float, float]:
     """(mean, SD) of giant_frac across networks at phi = 1. `extra`, if
     given, is a phi=1-only levels_extra_* array (same 7 columns) of
     additional independent networks, pooled in directly."""
@@ -59,35 +62,42 @@ def phi1_giant_frac(a: np.ndarray,
     return float(vals.mean()), float(vals.std())
 
 
-def phi1_r_giant(a: np.ndarray,
-                  extra: np.ndarray | None = None) -> tuple[float, float]:
+def phi1_r_giant(
+    a: np.ndarray, extra: np.ndarray | None = None
+) -> tuple[float, float]:
     """(mean, SD) of r_giant across networks at phi = 1, MIN_BLOCK-masked.
     `extra`, if given, is a phi=1-only levels_extra_* array pooled in."""
     phi, r_giant, giant_dim = a[:, 0], a[:, 2], a[:, 4]
-    sel = np.isclose(phi, 1.0) & (giant_dim >= MIN_BLOCK) \
-        & np.isfinite(r_giant)
+    sel = (
+        np.isclose(phi, 1.0) & (giant_dim >= MIN_BLOCK) & np.isfinite(r_giant)
+    )
     vals = r_giant[sel]
     if extra is not None:
         ephi, er_giant, egiant_dim = extra[:, 0], extra[:, 2], extra[:, 4]
-        esel = np.isclose(ephi, 1.0) & (egiant_dim >= MIN_BLOCK) \
+        esel = (
+            np.isclose(ephi, 1.0)
+            & (egiant_dim >= MIN_BLOCK)
             & np.isfinite(er_giant)
+        )
         vals = np.concatenate([vals, er_giant[esel]])
     return float(vals.mean()), float(vals.std())
 
 
-def pooled_stats(n1: int, mean1: float, sd1: float,
-                  vals2: np.ndarray) -> tuple[float, float]:
+def pooled_stats(
+    n1: int, mean1: float, sd1: float, vals2: np.ndarray
+) -> tuple[float, float]:
     """(mean, SD) of the union of a summarised group (n1, mean1, sd1,
     population SD) and a second group given as raw per-network values --
     used for panel h, where only the original 100 networks' aggregate is
-    on hand (spectral_data.npz stores no per-network counts), while the
+    on hand (spectral_data.h5 stores no per-network counts), while the
     extra 200 networks' raw per-network counts are."""
     n2 = len(vals2)
     mean2 = float(vals2.mean())
-    var1, var2 = sd1 ** 2, float(vals2.var())
+    var1, var2 = sd1**2, float(vals2.var())
     mean_total = (n1 * mean1 + n2 * mean2) / (n1 + n2)
-    ss = (n1 * (var1 + (mean1 - mean_total) ** 2)
-          + n2 * (var2 + (mean2 - mean_total) ** 2))
+    ss = n1 * (var1 + (mean1 - mean_total) ** 2) + n2 * (
+        var2 + (mean2 - mean_total) ** 2
+    )
     return mean_total, float(np.sqrt(ss / (n1 + n2)))
 
 
@@ -98,12 +108,14 @@ def extra_giant_atyp(extra3: np.ndarray) -> np.ndarray:
     net, atyp, in_giant = extra3
     atyp, in_giant = atyp > 0.5, in_giant > 0.5
     nets = np.unique(net)
-    return np.array([float((atyp[net == nn] & in_giant[net == nn]).sum())
-                      for nn in nets])
+    return np.array(
+        [float((atyp[net == nn] & in_giant[net == nn]).sum()) for nn in nets]
+    )
 
 
-def phi_prime_bootstrap(a: np.ndarray, rng: np.random.Generator,
-                         n_boot: int = N_BOOT) -> tuple[float, float, int]:
+def phi_prime_bootstrap(
+    a: np.ndarray, rng: np.random.Generator, n_boot: int = N_BOOT
+) -> tuple[float, float, int]:
     """(mean, SD, n_valid_draws) of the phi where r_whole crosses R_MID."""
     phi, r_whole = a[:, 0], a[:, 1]
     levels = np.unique(np.round(phi, 6))
@@ -113,11 +125,14 @@ def phi_prime_bootstrap(a: np.ndarray, rng: np.random.Generator,
         per_level.append(r_whole[sel])
     crossings = []
     for _ in range(n_boot):
-        curve = np.array([
-            rng.choice(vals, size=len(vals), replace=True).mean()
-            if len(vals) else np.nan
-            for vals in per_level
-        ])
+        curve = np.array(
+            [
+                rng.choice(vals, size=len(vals), replace=True).mean()
+                if len(vals)
+                else np.nan
+                for vals in per_level
+            ]
+        )
         ok = np.isfinite(curve)
         if ok.sum() < 2:
             continue
@@ -135,10 +150,12 @@ def phi_prime_bootstrap(a: np.ndarray, rng: np.random.Generator,
     return float(crossings.mean()), float(crossings.std()), len(crossings)
 
 
-def phi_chaotic_bootstrap(a: np.ndarray, rng: np.random.Generator,
-                           n_boot: int = N_BOOT,
-                           eps: float = PHI_CHAOTIC_EPS,
-                           ) -> tuple[float, float, int]:
+def phi_chaotic_bootstrap(
+    a: np.ndarray,
+    rng: np.random.Generator,
+    n_boot: int = N_BOOT,
+    eps: float = PHI_CHAOTIC_EPS,
+) -> tuple[float, float, int]:
     """(mean, SD, n_valid_draws) of the first flippability level at which the
     largest subspace's <r> satisfies |GOE - <r>| / (GOE - POISSON) < eps,
     bootstrapped over networks. Only levels where at least MIN_QUALIFY_FRAC
@@ -173,12 +190,13 @@ def phi_chaotic_bootstrap(a: np.ndarray, rng: np.random.Generator,
 
 
 def phi_recur_therm_bootstrap(
-    num_spins: int, model: str, rng: np.random.Generator,
+    num_spins: int,
+    model: str,
+    rng: np.random.Generator,
     n_boot: int = N_BOOT,
 ) -> tuple[float, float, int]:
     """(mean, SD, n_valid_draws) of the phi where the largest subspace's
-    recurrence fraction crosses its thermalized fraction (Fig.
-    2d). Same bootstrap-over-networks-per-level logic as
+    recurrence fraction crosses its thermalized fraction (Fig. 4b). Same bootstrap-over-networks-per-level logic as
     phi_prime_bootstrap, but resampling the (recurrence, thermalized)
     pair together per network, since both come from one realisation.
     """
@@ -242,18 +260,24 @@ def main() -> None:
             m, s, n_valid = phi_prime_bootstrap(a, rng)
             pp_m.append(m)
             pp_s.append(s)
-            print(f"  phi' N={n} {model}: {m:.4f} +- {s:.4f} "
-                  f"({n_valid}/{N_BOOT} valid draws)")
+            print(
+                f"  phi' N={n} {model}: {m:.4f} +- {s:.4f} "
+                f"({n_valid}/{N_BOOT} valid draws)"
+            )
             m, s, n_valid = phi_chaotic_bootstrap(a, rng)
             pc_m.append(m)
             pc_s.append(s)
-            print(f"  phi_chaotic(giant) N={n} {model}: {m:.4f} +- {s:.4f} "
-                  f"({n_valid}/{N_BOOT} valid draws)")
+            print(
+                f"  phi_chaotic(giant) N={n} {model}: {m:.4f} +- {s:.4f} "
+                f"({n_valid}/{N_BOOT} valid draws)"
+            )
             m, s, n_valid = phi_recur_therm_bootstrap(n, model, rng)
             rt_m.append(m)
             rt_s.append(s)
-            print(f"  phi_recur_therm N={n} {model}: {m:.4f} +- {s:.4f} "
-                  f"({n_valid}/{N_BOOT} valid draws)")
+            print(
+                f"  phi_recur_therm N={n} {model}: {m:.4f} +- {s:.4f} "
+                f"({n_valid}/{N_BOOT} valid draws)"
+            )
             atyp = d.get(f"atypical_{n}_{model}")
             atyp_sd = d.get(f"atypical_sd_{n}_{model}")
             if atyp is None:
@@ -269,8 +293,10 @@ def main() -> None:
                 m, s = pooled_stats(n0, m0, s0, extra_giant_atyp(b_extra))
             else:
                 m, s = m0, s0
-            print(f"  n_atyp(giant) N={n} {model}: {m0:.2f}+-{s0:.2f} "
-                  f"(n={n0}) -> {m:.2f}+-{s:.2f} (pooled)")
+            print(
+                f"  n_atyp(giant) N={n} {model}: {m0:.2f}+-{s0:.2f} "
+                f"(n={n0}) -> {m:.2f}+-{s:.2f} (pooled)"
+            )
             nt_m.append(m)
             nt_s.append(s)
         out[f"n_values_{model}"] = np.array(N_VALUES, dtype=float)
@@ -281,8 +307,8 @@ def main() -> None:
         out[f"n_atyp_giant_phi1_{model}"] = np.array([nt_m, nt_s])
         out[f"phi_recur_therm_{model}"] = np.array([rt_m, rt_s])
 
-    out_path = run_dir() / "spectral_extrapolation.npz"
-    np.savez(out_path, **out)
+    out_path = run_dir() / "spectral_extrapolation.h5"
+    save_arrays(out_path, out)
     print(f"wrote {out_path}")
 
 

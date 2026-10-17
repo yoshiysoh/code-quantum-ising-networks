@@ -1,4 +1,5 @@
-"""Check the effective Hamiltonian against the full one (Fig. S1).
+"""Check the effective Hamiltonian against the full one (Extended Data
+Fig. 1).
 
 The effective Hamiltonian keeps only the spin flips that leave the
 classical energy unchanged, so it is block-diagonal in the degenerate
@@ -36,9 +37,14 @@ import scipy.sparse as sp
 from scipy.sparse.csgraph import connected_components
 
 from qising_networks import run_dir
-from qising_networks.model import (build_network, degree_to_h_on_off,
-                                   flipability, h_on_off_to_h,
-                                   interaction_to_hamiltonian)
+from qising_networks.h5io import write_provenance
+from qising_networks.model import (
+    build_network,
+    degree_to_h_on_off,
+    flippability,
+    h_on_off_to_h,
+    interaction_to_hamiltonian,
+)
 
 MASTER_SEED: int = 42
 DEFAULT_PHI: float = 1.0
@@ -79,7 +85,10 @@ def build_approx_and_components(
 
 
 def diagonalize_blockdiag(
-    H_approx: np.ndarray, n_components: int, labels: np.ndarray, diag: np.ndarray
+    H_approx: np.ndarray,
+    n_components: int,
+    labels: np.ndarray,
+    diag: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Ascending eigenvalues of the block-diagonal H_approx, one block at a
     time, with the classical energy of each eigenvalue's block.
@@ -107,7 +116,9 @@ def diagonalize_blockdiag(
 
 
 def energy_level_fidelity_error(
-    eigvecs_exact: np.ndarray, shell_energy_approx: np.ndarray, diag_exact: np.ndarray
+    eigvecs_exact: np.ndarray,
+    shell_energy_approx: np.ndarray,
+    diag_exact: np.ndarray,
 ) -> float:
     """sum_i (1 - <psi_exact_i| P_i |psi_exact_i>), P_i the projector onto
     all Fock states with the classical energy of the i-th approximate
@@ -124,7 +135,9 @@ def energy_level_fidelity_error(
     return error
 
 
-def compare_exact_vs_approx(H_exact: np.ndarray, num_spins: int) -> tuple[float, float]:
+def compare_exact_vs_approx(
+    H_exact: np.ndarray, num_spins: int
+) -> tuple[float, float]:
     """(eigval_error, eigvec_error), rank-paired between the ascending exact
     and approximate spectra. H_exact is diagonalized in place; pass it as an
     unnamed expression so that it can be freed.
@@ -158,7 +171,7 @@ def _worker(args: tuple) -> dict | None:
         rng = np.random.default_rng(seed)
         im, degree = build_network(num_spins, model, rng)
         h_on, h_off = degree_to_h_on_off(degree)
-        k = int(round(phi * num_spins))
+        k = round(phi * num_spins)
         h = h_on_off_to_h(h_on, h_off, k, rng)
         Gamma_vec = gamma * np.ones(num_spins)
 
@@ -167,22 +180,28 @@ def _worker(args: tuple) -> dict | None:
             interaction_to_hamiltonian(im, Gamma_vec, h), num_spins
         )
 
-        return dict(
-            sample_idx=int(sample_idx),
-            eigval_error=eigval_error,
-            eigvec_error=eigvec_error,
-            phi=flipability((im != 0).sum(axis=1), h),
-            mean_degree=float(degree.mean()),
+        return {
+            "sample_idx": int(sample_idx),
+            "eigval_error": eigval_error,
+            "eigvec_error": eigvec_error,
+            "phi": flippability((im != 0).sum(axis=1), h),
+            "mean_degree": float(degree.mean()),
+        }
+    except Exception:
+        log.exception(
+            "sample %d (N=%d, %s, Gamma=%s) failed",
+            sample_idx,
+            num_spins,
+            model,
+            gamma,
         )
-    except Exception:                                        # noqa: BLE001
-        log.exception("sample %d (N=%d, %s, Gamma=%s) failed",
-                     sample_idx, num_spins, model, gamma)
         return None
 
 
 def write_h5(path: Path, rows: list[dict], params: dict) -> None:
     tmp = path.with_suffix(".partial.h5")
     with h5py.File(tmp, "w") as f:
+        write_provenance(f)
         p = f.create_group("params")
         for k, v in params.items():
             p.attrs[k] = v
@@ -193,27 +212,51 @@ def write_h5(path: Path, rows: list[dict], params: dict) -> None:
         g = f.create_group("samples")
         for col in cols:
             g.create_dataset(
-                col, data=np.array([r[col] for r in rows]),
-                compression="gzip", compression_opts=4,
+                col,
+                data=np.array([r[col] for r in rows]),
+                compression="gzip",
+                compression_opts=4,
             )
     tmp.replace(path)
 
 
-def run(num_spins: int, model: str, gamma: float, nsamples: int, phi: float,
-        seed0: int, out_dir: Path, workers: int) -> Path:
+def run(
+    num_spins: int,
+    model: str,
+    gamma: float,
+    nsamples: int,
+    phi: float,
+    seed0: int,
+    out_dir: Path,
+    workers: int,
+) -> Path:
     seeds = np.random.SeedSequence(
         [MASTER_SEED, num_spins, 0 if model == "ferro" else 1, seed0]
     ).spawn(nsamples)
-    jobs = [(i, num_spins, model, gamma, phi, seeds[i]) for i in range(nsamples)]
+    jobs = [
+        (i, num_spins, model, gamma, phi, seeds[i]) for i in range(nsamples)
+    ]
 
     out = out_dir / f"hamapprox_N{num_spins}_{model}_gamma{gamma:.2f}.h5"
-    params = dict(num_spins=num_spins, model=model, gamma=gamma,
-                  nsamples=nsamples, phi_target=phi, seed0=seed0,
-                  master_seed=MASTER_SEED)
+    params = {
+        "num_spins": num_spins,
+        "model": model,
+        "gamma": gamma,
+        "nsamples": nsamples,
+        "phi_target": phi,
+        "seed0": seed0,
+        "master_seed": MASTER_SEED,
+    }
 
     rows: list[dict] = []
-    log.info("N=%d %s Gamma=%.2f: %d realisations on %d workers",
-             num_spins, model, gamma, nsamples, workers)
+    log.info(
+        "N=%d %s Gamma=%.2f: %d realisations on %d workers",
+        num_spins,
+        model,
+        gamma,
+        nsamples,
+        workers,
+    )
     with mp.Pool(workers) as pool:
         for i, r in enumerate(pool.imap_unordered(_worker, jobs, chunksize=1)):
             if r is not None:
@@ -230,9 +273,9 @@ def self_test() -> None:
     """Brute-force cross-check of build_approx_and_components on a tiny
     system: for every pair of Fock states, H_approx should retain an
     off-diagonal element if and only if the two states are Hamming-distance
-    1 AND share the same classical (diagonal) energy -- exactly
-    eq:supp-approx-H's delta[H(s), H(F_k s)] condition, checked here by an
-    independent double loop rather than the vectorized bit-trick under
+    1 AND share the same classical (diagonal) energy -- the
+    delta[H(s), H(F_k s)] condition of the effective Hamiltonian (SI,
+    Section I), checked here by an independent double loop rather than the vectorized bit-trick under
     test, and the retained-edge connected components must match
     H_approx's own nonzero block structure."""
     num_spins = 5
@@ -245,8 +288,8 @@ def self_test() -> None:
     dim = H_exact.shape[0]
     diag = np.diag(H_exact)
 
-    H_approx, n_components, labels, diag_returned = build_approx_and_components(
-        H_exact.copy(), num_spins
+    H_approx, n_components, labels, diag_returned = (
+        build_approx_and_components(H_exact.copy(), num_spins)
     )
     assert np.array_equal(diag_returned, diag)
 
@@ -255,7 +298,7 @@ def self_test() -> None:
     for s, sp_ in itertools.product(range(dim), repeat=2):
         if s == sp_:
             continue
-        hamming = bin(s ^ sp_).count("1")
+        hamming = (s ^ sp_).bit_count()
         if hamming == 1 and diag[s] == diag[sp_]:
             expected[s, sp_] = -gamma
 
@@ -263,7 +306,9 @@ def self_test() -> None:
 
     # Every retained edge must sit inside a single connected component.
     rows, cols = np.nonzero(np.triu(H_approx, 1))
-    assert np.all(labels[rows] == labels[cols]), "floppy edge crosses components"
+    assert np.all(labels[rows] == labels[cols]), (
+        "floppy edge crosses components"
+    )
 
     # Diagonalizing block-wise must reproduce a plain dense eigh of H_approx.
     eigvals_block, shell_energy = diagonalize_blockdiag(
@@ -295,23 +340,38 @@ def main():
     ap.add_argument("--nsamples", type=int, required=True)
     ap.add_argument("--phi", type=float, default=DEFAULT_PHI)
     ap.add_argument("--seed0", type=int, default=1000)
-    ap.add_argument("--out-dir", type=Path, default=None,
-                    help="default: data/<today's date>/")
+    ap.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="default: data/<today's date>/",
+    )
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--skip-self-test", action="store_true")
     args = ap.parse_args()
 
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     args.out_dir = args.out_dir or run_dir()
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    workers = args.workers or int(os.environ.get("NUM_WORKERS", mp.cpu_count()))
+    workers = args.workers or int(
+        os.environ.get("NUM_WORKERS", mp.cpu_count())
+    )
 
     if not args.skip_self_test:
         self_test()
 
-    run(args.N, args.model, args.gamma, args.nsamples, args.phi, args.seed0,
-        args.out_dir, workers)
+    run(
+        args.N,
+        args.model,
+        args.gamma,
+        args.nsamples,
+        args.phi,
+        args.seed0,
+        args.out_dir,
+        workers,
+    )
 
 
 if __name__ == "__main__":

@@ -6,7 +6,17 @@ import matplotlib as mpl
 import numpy as np
 
 MONO = "0.15"
+COLOR_FERRO = "black"
+COLOR_PMJ = "gray"
 
+# Display names, indexed by the class label of scar_metrics.
+CLASS_LABELS = (
+    "Localized",
+    "Recurrence",
+    "Scar",
+    "Plateau scar",
+    "Thermalized",
+)
 # Dark2, in Fig. 3's column order.
 _dark2 = mpl.colormaps["Dark2"].colors
 CLASS_COLORS = (_dark2[0], _dark2[1], _dark2[3], _dark2[4], _dark2[2])
