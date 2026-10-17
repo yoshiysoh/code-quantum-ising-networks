@@ -17,7 +17,8 @@ import h5py
 import numpy as np
 import pytest
 
-from qising_networks import h5io
+from qising_networks import DATA_DIR, h5io
+from qising_networks.scar_metrics import NULL_FILE
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV = {
@@ -27,6 +28,10 @@ ENV = {
     "OPENBLAS_NUM_THREADS": "1",
     "MKL_NUM_THREADS": "1",
 }
+# The class rule reads the revival null from data/.
+needs_null = pytest.mark.skipif(
+    not (DATA_DIR / NULL_FILE).exists(), reason="data/ not downloaded"
+)
 PROVENANCE_KEYS = {
     "git_commit",
     "command",
@@ -88,6 +93,7 @@ def test_revival_null():
         assert np.all((vals >= 0) & (vals <= 1))
 
 
+@needs_null
 def test_class_dataset(tmp_path):
     run_script(
         "generate_class_dataset.py",
@@ -148,6 +154,7 @@ def test_hamiltonian_check(tmp_path):
     assert_provenance(out)
 
 
+@needs_null
 @pytest.mark.parametrize("model", ["ferro", "pmJ"])
 def test_ring_example(tmp_path, model):
     args = [

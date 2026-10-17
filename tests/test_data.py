@@ -29,6 +29,8 @@ def manifest() -> list[tuple[str, str]]:
 @pytest.mark.skipif(not MANIFEST.exists(), reason="data/ not downloaded")
 @pytest.mark.parametrize("digest, name", manifest(), ids=lambda v: v[:16])
 def test_data_file_matches_manifest(digest: str, name: str) -> None:
+    if not (DATA_DIR / name).exists():
+        pytest.skip(f"{name} not downloaded")
     h = hashlib.sha256()
     with open(DATA_DIR / name, "rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):

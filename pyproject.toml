@@ -9,3 +9,6 @@ requires-python = ">=3.10"
 
 [tool.ruff]
 line-length = 79
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
